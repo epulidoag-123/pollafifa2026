@@ -589,7 +589,7 @@ footer a{color:var(--gold);text-decoration:none;}
 <script>
 // ========== CONFIGURACIÓN ==========
 const ADMIN_PASS = "Mundial2026#";
-const API_KEY    = "";   // La key vive en el Cloudflare Worker, no aquí
+const API_KEY    = a11098b27a534122a7cf77547868e02b"";   // La key vive en el Cloudflare Worker, no aquí
 
 const PARTICIPANTS = [
   { 
@@ -942,7 +942,8 @@ async function fetchMatches() {
   // La API Key está en el Worker — siempre intentar conectar
   try {
     // El Worker de Cloudflare añade la API Key y evita CORS
-    const r = await fetch('/api/matches');
+    const r = await fetch(`https://api.football-data.org/v4/competitions/2000/matches`, {
+  headers: { 'X-Auth-Token': API_KEY }
     if (!r.ok) {
       const errBody = await r.text().catch(() => '');
       throw new Error(
