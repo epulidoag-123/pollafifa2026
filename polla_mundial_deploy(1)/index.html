@@ -548,6 +548,21 @@ footer a{color:var(--gold);text-decoration:none;}
   </div>
 </footer>
 
+<!-- BOTÓN Y MODAL SECRETOS DE ADMIN -->
+<button id="btn-secreto-admin" style="position: fixed; bottom: 10px; left: 10px; background: transparent; border: none; color: #ccc; cursor: pointer; font-size: 11px; z-index: 9999;" onclick="abrirPanelAdmin()">🔧 Admin</button>
+
+<div id="modal-admin" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; justify-content: center; align-items: center; font-family: sans-serif;">
+    <div style="background: #fff; color: #333; padding: 25px; border-radius: 8px; width: 90%; max-width: 500px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.3); position: relative;">
+        <span style="position: absolute; top: 10px; right: 15px; font-size: 24px; cursor: pointer; color: #666;" onclick="cerrarPanelAdmin()">&times;</span>
+        <h3 style="margin-top: 0; color: #0055FF; border-bottom: 2px solid #FF007F; padding-bottom: 8px;">Panel de Control Real - Fixture 2026</h3>
+        <p style="font-size: 13px; color: #666;">Ingresa los marcadores oficiales. Las quinielas se recalcularán automáticamente.</p>
+        
+        <div id="lista-partidos-admin" style="margin-top: 15px;"></div>
+        
+        <button onclick="guardarResultadosAdmin()" style="width: 100%; background: #0055FF; color: white; border: none; padding: 12px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 15px; font-size: 14px; transition: background 0.2s;">Guardar Marcadores Oficiales</button>
+    </div>
+</div>
+
 <!-- Banderas de países sede debajo del footer (tamaño reducido) -->
 <div style="display: flex; justify-content: center; align-items: center; gap: 32px; margin: 20px auto 40px; padding: 0 16px; flex-wrap: wrap;">
   <img src="images/mexico-flag.png" alt="México" style="height: 120px; width: auto; border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);">
@@ -589,7 +604,7 @@ footer a{color:var(--gold);text-decoration:none;}
 <script>
 // ========== CONFIGURACIÓN ==========
 const ADMIN_PASS = "Mundial2026#";
-const API_KEY    = a11098b27a534122a7cf77547868e02b"";   // La key vive en el Cloudflare Worker, no aquí
+const API_KEY    = "";   // La key vive en el Cloudflare Worker, no aquí
 
 const PARTICIPANTS = [
   { 
@@ -942,8 +957,7 @@ async function fetchMatches() {
   // La API Key está en el Worker — siempre intentar conectar
   try {
     // El Worker de Cloudflare añade la API Key y evita CORS
-    const r = await fetch(`https://api.football-data.org/v4/competitions/2000/matches`, {
-  headers: { 'X-Auth-Token': API_KEY }
+    const r = await fetch('/api/matches');
     if (!r.ok) {
       const errBody = await r.text().catch(() => '');
       throw new Error(
@@ -1683,6 +1697,155 @@ function copySingleParticipant(id) {
     .catch(err => { console.error(err); toast('⚠️ Error al copiar'); });
 }
 
+// ==========================================
+// SISTEMA DE ADMINISTRACIÓN LOCAL (OPCIÓN B)
+// ==========================================
+
+// Objeto en memoria para guardar los resultados oficiales de los partidos de forma persistente
+let resultadosOficiales = JSON.parse(localStorage.getItem('resultados_oficiales_mundial')) || {};
+
+// Función modificada para leer los datos reales de forma local instantánea
+async function actualizarPartidosDesdeAPI() {
+    try {
+        console.log("⚽ Cargando base de datos interna de resultados...");
+        
+        // Si la API falla o está vacía, generamos los 104 partidos para el Modo Local
+        if (apiMatches.length === 0) {
+            console.log("Generando 104 partidos por defecto (Modo Local)...");
+            apiMatches = Array.from({ length: 104 }, (_, i) => {
+                const id = String(i + 1);
+                let stage = 'GROUP_STAGE';
+                const num = i + 1;
+                if (num >= 73 && num <= 88) stage = 'LAST_32';
+                else if (num >= 89 && num <= 96) stage = 'LAST_16';
+                else if (num >= 97 && num <= 100) stage = 'QUARTER_FINALS';
+                else if (num >= 101 && num <= 102) stage = 'SEMI_FINALS';
+                else if (num === 103) stage = 'THIRD_PLACE';
+                else if (num === 104) stage = 'FINAL';
+                
+                return {
+                    id: id,
+                    stage: stage,
+                    status: 'TIMED',
+                    utcDate: new Date(2026, 5, 11 + Math.floor((num-1)/8), 18).toISOString(),
+                    homeTeam: { name: `Equipo Local ${id}`, shortName: `L${id}` },
+                    awayTeam: { name: `Equipo Visit. ${id}`, shortName: `V${id}` },
+                    score: { fullTime: { home: null, away: null } }
+                };
+            });
+        }
+
+        apiMatches.forEach(m => {
+            if (resultadosOficiales[m.id]) {
+                m.status = "FINISHED";
+                if (!m.score) m.score = { fullTime: {} };
+                m.score.fullTime.home = resultadosOficiales[m.id].golesL;
+                m.score.fullTime.away = resultadosOficiales[m.id].golesV;
+            } else {
+                m.status = "TIMED";
+                if (!m.score) m.score = { fullTime: { home: null, away: null } };
+                else m.score.fullTime = { home: null, away: null };
+            }
+        });
+
+        // Ejecutar las funciones internas que ya tienes para calcular los puntos de los participantes
+        if (typeof renderRanking === 'function') renderRanking(apiMatches);
+        if (typeof renderMgrid === 'function') renderMgrid(apiMatches);
+        if (typeof renderQGlobal === 'function') renderQGlobal(PARTICIPANTS, apiMatches);
+
+        console.log("✅ Datos locales sincronizados con las quinielas exitosamente.");
+    } catch (error) {
+        console.error("Error al procesar el fixture local:", error);
+    }
+}
+
+// Hook para sobreescribir la función fetchMatches y procesar tus datos manuales locales siempre
+const fetchMatchesOriginal = fetchMatches;
+fetchMatches = async function() {
+    await fetchMatchesOriginal();
+    actualizarPartidosDesdeAPI();
+};
+
+// LÓGICA DE SEGURIDAD OCULTA DEL PANEL
+function abrirPanelAdmin() {
+    // La contraseña está protegida internamente en esta variable
+    const tokenSeguro = "admin123"; 
+    const intentoUsuario = prompt("🔐 Ingrese la contraseña de administrador para modificar marcadores:");
+    
+    if (intentoUsuario === tokenSeguro) {
+        document.getElementById('modal-admin').style.display = 'flex';
+        renderizarPartidosAdmin();
+    } else if (intentoUsuario !== null) {
+        alert("❌ Contraseña incorrecta. Acceso denegado.");
+    }
+}
+
+function cerrarPanelAdmin() {
+    document.getElementById('modal-admin').style.display = 'none';
+}
+
+// Genera el listado interactivo de los partidos dentro del modal de administración
+function renderizarPartidosAdmin() {
+    const contenedor = document.getElementById('lista-partidos-admin');
+    contenedor.innerHTML = ''; // Limpiar contenedor
+    
+    // Si por alguna razón la lista está vacía, se genera automáticamente
+    if (apiMatches.length === 0) {
+        actualizarPartidosDesdeAPI();
+    }
+
+    // Dibujamos los renglones para rellenar marcadores rápidamente
+    apiMatches.forEach(partido => {
+        const guardado = resultadosOficiales[partido.id] || { golesL: '', golesV: '' };
+        const locName = partido.homeTeam?.name || partido.homeTeam?.shortName || 'Local';
+        const visName = partido.awayTeam?.name || partido.awayTeam?.shortName || 'Visitante';
+        const isFinished = guardado.golesL !== '' ? 'background: #f0fdf4;' : ''; // Verde suave si ya se jugó
+
+        const row = document.createElement('div');
+        row.style.cssText = `display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 8px; border-bottom: 1px solid #eee; border-radius: 4px; font-size: 13px; ${isFinished}`;
+        row.innerHTML = `
+            <span style="font-weight:bold; color:#FF007F; width:35px;">#${partido.id}</span>
+            <span style="flex:1; text-align:right; margin-right:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#333;">${locName}</span>
+            <input type="number" id="admin-L-${partido.id}" value="${guardado.golesL}" style="width: 45px; text-align: center; border: 1px solid #ccc; border-radius: 4px; padding: 4px; color:#333;" min="0">
+            <span style="margin: 0 8px; color:#333; font-weight:bold;">-</span>
+            <input type="number" id="admin-V-${partido.id}" value="${guardado.golesV}" style="width: 45px; text-align: center; border: 1px solid #ccc; border-radius: 4px; padding: 4px; color:#333;" min="0">
+            <span style="flex:1; text-align:left; margin-left:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#333;">${visName}</span>
+        `;
+        contenedor.appendChild(row);
+    });
+}
+
+// Guarda los marcadores de forma persistente y dispara el cálculo inmediato
+function guardarResultadosAdmin() {
+    let listaPartidos = apiMatches;
+
+    listaPartidos.forEach(partido => {
+        const inputL = document.getElementById(`admin-L-${partido.id}`);
+        const inputV = document.getElementById(`admin-V-${partido.id}`);
+        
+        if (inputL && inputV) {
+            const valL = inputL.value;
+            const valV = inputV.value;
+            
+            if (valL !== '' && valV !== '') {
+                resultadosOficiales[partido.id] = {
+                    golesL: parseInt(valL),
+                    golesV: parseInt(valV)
+                };
+            } else if (valL === '' && valV === '') {
+                delete resultadosOficiales[partido.id]; // Si lo dejan en blanco, quita el resultado
+            }
+        }
+    });
+
+    // Guardar en el LocalStorage del navegador para que no se pierdan al cerrar la pestaña
+    localStorage.setItem('resultados_oficiales_mundial', JSON.stringify(resultadosOficiales));
+    
+    alert("🚀 Marcadores guardados oficialmente. Calculando puntajes de las quinielas...");
+    cerrarPanelAdmin();
+    actualizarPartidosDesdeAPI(); // Actualizar interfaz y cálculos al instante
+}
+
 // ========== INICIALIZACIÓN ==========
 document.addEventListener('DOMContentLoaded', () => {
   // Inicializar KPIs
@@ -1692,18 +1855,18 @@ document.addEventListener('DOMContentLoaded', () => {
   renderRanking([]);
   renderMgrid([]);
   renderQGlobal(PARTICIPANTS, [], 'qg-head', 'qg-body', 'q-cnt');
-  renderDemo();
 
   // Conectar API si hay key
   if (getKey()) {
     fetchMatches();
   } else {
     setApiSt('err', 'Sin API Key');
+    actualizarPartidosDesdeAPI();
   }
 
   // Auto-refresh cada 5 minutos
   setInterval(() => { if (getKey()) fetchMatches(); }, 5 * 60 * 1000);
 });
-</script>  
+</script>
 
 </body></html>
